@@ -41,6 +41,7 @@ def gmul(input):
     W = W.split(1, 3)
     W = W + (y.unsqueeze(3),)
     W = torch.cat(W, 1).squeeze(3) # W is now a tensor of size (bs, J*N, N)
+    #print(W, x)
     output = torch.bmm(W, x) # output has size (bs, J*N, num_features)
     output = output.split(N, 1)
     output = torch.cat(output, 2) # output has size (bs, N, J*num_features)
@@ -149,7 +150,39 @@ def plot_clusters(num, pred, cities):
     plt.title('clustering')
     plt.savefig('./plots/clustering/clustering_it_{}.png'.format(num))
     
-    
+def normalize_embeddings(emb):
+    norm = torch.mul(emb, emb).sum(2).unsqueeze(2).sqrt().expand_as(emb)
+    return emb.div(norm)
+
+class GNN(nn.Module):
+    def __init__(self, num_features, num_layers, J, dim_input=1):
+        super(GNN, self).__init__()
+        self.num_features = num_features
+        self.num_layers = num_layers
+        self.featuremap_in = [dim_input, num_features]
+        self.featuremap_mi = [num_features, num_features]
+        self.featuremap_end = [num_features, num_features]
+        self.layer0 = Gconv(self.featuremap_in, J)
+        for i in range(num_layers):
+            module = Gconv(self.featuremap_mi, J)
+            self.add_module('layer{}'.format(i + 1), module)
+        self.layerlast = Gconv(self.featuremap_end, J, last=True)
+
+    def forward(self, input):
+        cur = self.layer0(input)
+        for i in range(self.num_layers):
+            cur = self._modules['layer{}'.format(i+1)](cur)
+        emb = self.layerlast(cur)[1]
+        # emb are tensors of size (bs, N, num_features)
+        N = emb.size(1)
+        
+        # l2normalize the embeddings
+        emb = normalize_embeddings(emb)
+        out = torch.bmm(emb, emb.permute(0, 2, 1))
+        diag = (-1000 * Variable(torch.eye(N).unsqueeze(0)
+                .expand_as(out)).type(dtype))
+        out = out + diag
+        return out # out has size (bs, N, N)
 
 
 if __name__ == '__main__':
