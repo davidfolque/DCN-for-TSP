@@ -166,7 +166,7 @@ def compute_variance(probs):
 def compute_test_cost(pred, W, beam_size):
     utils.beamsearch_hamcycle(pred.data, W.data, beam_size=beam_size)
 
-def test(split, tsp, merge, logger, gen, beam_size=2):
+def test(split, logger, gen):
     iterations_test = int(gen.num_examples_test / batch_size)
     # siamese_gnn.eval()
     for it in range(iterations_test):
@@ -174,23 +174,21 @@ def test(split, tsp, merge, logger, gen, beam_size=2):
         batch = gen.sample_batch(batch_size, is_training=False, it=it,
                                 cuda=torch.cuda.is_available())
         input, W, WTSP, labels, target, cities, perms, costs = extract(batch)
-        probs, variance, log_probs_samples, pred = execute(split, tsp, merge, batch)
-        loss, loss_split = compute_loss(pred, target, log_probs_samples)
-        #loss_split -= variance*rf
+        
+        probs, ground_truth, loss = execute_split_train(split, batch)
         
         last = (it == iterations_test-1)
-        logger.add_test_accuracy(pred, labels, perms, W, cities, costs,
-                                 last=last, beam_size=beam_size)
+        logger.add_test_accuracy(probs.data, ground_truth, last=last)
         logger.add_test_loss(loss, last=last)
         elapsed = time.time() - start
         if not last and it % 100 == 0:
             loss = loss.data.cpu().numpy()[0]
             out = ['---', it, loss, logger.accuracy_test_aux[-1], 
-                   logger.cost_test_aux[-1], beam_size, elapsed]
+                   0, 0, elapsed]
             print(template_test1.format(*info_test))
             print(template_test2.format(*out))
     print('TEST COST: {} | TEST ACCURACY {}\n'
-          .format(logger.cost_test[-1], logger.accuracy_test[-1]))
+          .format(0, logger.accuracy_test[-1]))
 
 def execute(Split, Tsp, Merge, batch):
     input, W, WTSP, labels, target, cities, perms, costs = extract(batch)
@@ -208,7 +206,7 @@ def execute(Split, Tsp, Merge, batch):
     #partial_pred = Tsp((WW,x,y))
     #partial_pred = partial_pred * Variable(Phi)
     #print(input[0], input[1], partial_pred)
-    entradaY = oracle_split(W.data, target[0], perms)
+    entradaY = oracle_split(W.data, target[0], perms)[0]
     pred = Merge((input[0], input[1], entradaY.float()))
     return 0, 0, Variable(torch.zeros(batch_size,N)).type(dtype), pred
 
@@ -248,31 +246,46 @@ def fake_split(W, mat_perm, perms, i):
 
 def oracle_split(W, mat_perm, perms):
     N = mat_perm.size(-1)
-    def index(k):
-        return (N+k+i)%N
-    
     bs = mat_perm.size(0)
     out = mat_perm.clone()
+    sep = torch.LongTensor(bs).fill_(0).type(dtype_l)
+    gt = torch.zeros(bs,N).type(dtype)
     for b in range(bs):
         costos = torch.zeros(N//2).type(dtype)
         for i in range(N // 2):
             pre0,exc0,pre10,exc10 = fake_split_b(W[b],mat_perm[b],perms[b],i)
-            costos[i] = W[b,pre0,exc0] + W[b,pre10,exc10] - W[b,pre0,exc10] - W[b,pre10,exc0]
+            costos[i] = -(W[b,pre0,exc0] + W[b,pre10,exc10] - W[b,pre0,exc10] - W[b,pre10,exc0])
         imax = costos.max(0)[1]
-        pre0,exc0,pre10,exc10 = fake_split_b(W[b],mat_perm[b],perms[b],imax[0])
-        out[b,pre0,exc0] = 0
-        out[b,exc0,pre0] = 0
-        out[b,pre0,exc10] = 1
-        out[b,exc10,pre0] = 1
-        out[b,pre10,exc0] = 1
-        out[b,exc0,pre10] = 1
-        out[b,pre10,exc10] = 0
-        out[b,exc10,pre10] = 0
-    return out
+        for i in range(N // 2):
+            ind = math.floor(perms[b,(N + imax[0] + i)%N] + 0.5)
+            gt[b,ind] = 1.0
+        
+    return gt
+
+def compute_split_loss(probs, gt):
+    bs = probs.size(0)
+    N = probs.size(1)
+    gt_inv = Variable(1 - gt)
+    gt = Variable(gt)
+    probs_inv = 1 - probs
+    A = torch.bmm(gt.unsqueeze(1),torch.log(probs.unsqueeze(2))) + torch.bmm(gt_inv.unsqueeze(1),torch.log(probs_inv.unsqueeze(2)))
+    B = torch.bmm(gt_inv.unsqueeze(1),torch.log(probs.unsqueeze(2))) + torch.bmm(gt.unsqueeze(1),torch.log(probs_inv.unsqueeze(2)))
+    m = torch.min(-A,-B).squeeze()
+    loss = m.mean(0)
+    return loss
+
+def execute_split_train(Split, batch):
+    input, W, WTSP, labels, target, cities, perms, costs = extract(batch)
+    scores, probs = Split(input)
+    #variance = compute_variance(probs)
+    #sample, log_probs_samples = sample_one(probs, mode='train')
+    ground_truth = oracle_split(W.data, target[0], perms)
+    loss = compute_split_loss(probs, ground_truth)
+    return probs, ground_truth, loss
 
 
 if __name__ == '__main__':
-    path_dataset = './dataset/'
+    path_dataset = './dataset/2clusters/'
     gen = Generator(path_dataset, './LKH/')
     N = 20
     gen.num_examples_train = 20000
@@ -303,29 +316,26 @@ if __name__ == '__main__':
         start = time.time()
         batch = gen.sample_batch(batch_size, cuda=torch.cuda.is_available())
         input, W, WTSP, labels, target, cities, perms, costs = extract(batch)
-        probs, variance, log_probs_samples, pred = execute(Split, Tsp, Merge, batch)
-        loss, loss_reinforce = compute_loss(pred, target, log_probs_samples)
-        #loss_reinforce -= variance*rf
-        #Split.zero_grad()
-        #loss_reinforce.backward()
-        #nn.utils.clip_grad_norm(Split.parameters(), clip_grad)
-        #optimizer_split.step()
+        probs, ground_truth, loss_split = execute_split_train(Split, batch)
+        Split.zero_grad()
+        loss_split.backward()
+        nn.utils.clip_grad_norm(Split.parameters(), clip_grad)
+        optimizer_split.step()
         #Tsp.zero_grad()
-        Merge.zero_grad()
-        loss.backward()
+        #Merge.zero_grad()
+        #loss.backward()
         #nn.utils.clip_grad_norm(Tsp.parameters(), clip_grad)
-        nn.utils.clip_grad_norm(Merge.parameters(), clip_grad)
+        #nn.utils.clip_grad_norm(Merge.parameters(), clip_grad)
         #optimizer_tsp.step()
-        optimizer_merge.step()
-        logger.add_train_loss(loss)
-        logger.add_train_accuracy(pred, labels, W)
+        #optimizer_merge.step()
+        logger.add_train_loss(loss_split)
+        logger.add_train_accuracy(probs.data, ground_truth)
         elapsed = time.time() - start
         
         if it%50 == 0:
-            loss = loss.data.cpu().numpy()[0]
-            loss_reinforce = loss_reinforce.data.cpu().numpy()[0]
-            out = ['---', it, loss, logger.accuracy_train[-1],
-                   logger.cost_train[-1], loss_reinforce, elapsed]
+            loss_split = loss_split.data.cpu().numpy()[0]
+            out = ['---', it, loss_split, logger.accuracy_train[-1],
+                   0, 0, elapsed]
             print(template_train1.format(*info_train))
             print(template_train2.format(*out))
             #print(variance)
@@ -333,7 +343,7 @@ if __name__ == '__main__':
             #plot_clusters(it, probs[0], cities[0])
             #os.system('eog ./plots/clustering/clustering_it_{}.png'.format(it))
         if it%200 == 0 and it > 0:
-            test(Split, Tsp, Merge, logger, gen, beam_size=beam_size)
+            test(Split, logger, gen)
         
         
         

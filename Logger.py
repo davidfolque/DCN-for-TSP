@@ -126,31 +126,29 @@ class Logger(object):
             self.loss_test.append(loss_test)
             self.loss_test_aux = []
 
-    def add_train_accuracy(self, pred, labels, W):
-        accuracy = utils.compute_accuracy(pred, labels)
-        costs = utils.compute_mean_cost(pred, W)
+    def add_train_accuracy(self, probs, gt):
+        accuracy = utils.compute_accuracy(probs, gt)
+        #costs = utils.compute_mean_cost(pred, W)
         self.accuracy_train.append(accuracy)
-        self.cost_train.append(sum(costs) / float(len(costs)))
+        #self.cost_train.append(sum(costs) / float(len(costs)))
 
-    def add_test_accuracy(self, pred, labels, perms, W, cities, oracle_costs,
-                          last=False, beam_size=2):
-        accuracy = utils.compute_accuracy(pred, labels)
-        costs, Paths = utils.beamsearch_hamcycle(pred.data, W.data,
-                                                 beam_size=beam_size)
+    def add_test_accuracy(self, probs, gt, last=False):
+        accuracy = utils.compute_accuracy(probs, gt)
+        
         self.accuracy_test_aux.append(accuracy)
-        self.cost_test_aux.append(np.array(costs.cpu().numpy()).mean())
-        self.cost_test_aux_oracle.append(np.array(oracle_costs).mean())
+        #self.cost_test_aux.append(np.array(costs.cpu().numpy()).mean())
+        #self.cost_test_aux_oracle.append(np.array(oracle_costs).mean())
         if last:
             accuracy_test = np.array(self.accuracy_test_aux).mean()
             self.accuracy_test.append(accuracy_test)
             self.accuracy_test_aux = []
-            cost_test = np.array(self.cost_test_aux).mean()
-            self.cost_test.append(cost_test)
-            self.cost_test_aux = []
-            cost_test_oracle = np.array(self.cost_test_aux_oracle).mean()
-            self.cost_test_oracle.append(cost_test_oracle)
-            self.cost_test_aux_oracle = []
-            self.plot_example(Paths, costs, oracle_costs, perms, cities)
+            #cost_test = np.array(self.cost_test_aux).mean()
+            #self.cost_test.append(cost_test)
+            #self.cost_test_aux = []
+            #cost_test_oracle = np.array(self.cost_test_aux_oracle).mean()
+            #self.cost_test_oracle.append(cost_test_oracle)
+            #self.cost_test_aux_oracle = []
+            #self.plot_example(Paths, costs, oracle_costs, perms, cities)
 
     def plot_train_logs(self):
         plt.figure(0, figsize=(20, 20))

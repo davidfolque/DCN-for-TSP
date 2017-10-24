@@ -166,10 +166,26 @@ class Generator(TSP):
         W = torch.from_numpy(W).type(dtype)
         return W
 
+    def gaussian_example(self, length, clusters):
+        centers = np.random.uniform(0, 1, [clusters, 2])
+        per_cl = length // clusters
+        Pts = []
+        cov = 0.001 * np.eye(2, 2)
+        target = np.zeros([length])
+        for c in range(clusters):
+            points = np.random.multivariate_normal(centers[c], cov, per_cl)
+            target[c * per_cl: (c + 1) * per_cl] = c
+            Pts.append(points)
+        points = np.reshape(Pts, [-1, 2])
+        rand_perm = np.random.permutation(length)
+        points = points[rand_perm]
+        target = target[rand_perm]
+        return points, target
+
     def compute_example(self, i):
         example = {}
         if self.mode == 'CEIL_2D':
-            cities = self.cities_generator(self.N)
+            cities,_ = self.gaussian_example(self.N, 2)
             if i == 0 and self.dual:
                 W = self.adj_from_coord(cities)
                 WW, x = self.compute_operators(W)
