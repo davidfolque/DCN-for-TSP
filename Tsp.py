@@ -14,6 +14,7 @@ import os
 import time
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
+import math
 
 '''
 class Tsp():
@@ -171,21 +172,9 @@ def test(split, tsp, merge, logger, gen, beam_size=2):
     for it in range(iterations_test):
         start = time.time()
         batch = gen.sample_batch(batch_size, is_training=False, it=it,
-                                 cuda=torch.cuda.is_available())
+                                cuda=torch.cuda.is_available())
         input, W, WTSP, labels, target, cities, perms, costs = extract(batch)
-        scores, probs = split(input)
-        sample, log_probs_samples = sample_one(probs, mode='test')
-        WW, x, Phi = compute_operators(W.data, sample, J)
-        x = torch.cat((x.unsqueeze(2),cities),2)
-        y = WW[:,:,:,1]
-        WW = Variable(WW).type(dtype)
-        x = Variable(x).type(dtype)
-        y = Variable(y).type(dtype)
-        #print(WW, x, y)
-        partial_pred = tsp((WW,x,y))
-        partial_pred = partial_pred * Variable(Phi)
-        #print(input[0], input[1], partial_pred)
-        pred = merge((input[0], input[1], target[0].float()))
+        probs, variance, log_probs_samples, pred = execute(split, tsp, merge, batch)
         loss, loss_split = compute_loss(pred, target, log_probs_samples)
         #loss_split -= variance*rf
         
@@ -203,6 +192,83 @@ def test(split, tsp, merge, logger, gen, beam_size=2):
     print('TEST COST: {} | TEST ACCURACY {}\n'
           .format(logger.cost_test[-1], logger.accuracy_test[-1]))
 
+def execute(Split, Tsp, Merge, batch):
+    input, W, WTSP, labels, target, cities, perms, costs = extract(batch)
+    #print(target[0])
+    #scores, probs = Split(input)
+    #variance = compute_variance(probs)
+    #sample, log_probs_samples = sample_one(probs, mode='train')
+    #WW, x, Phi = compute_operators(W.data, sample, J)
+    #x = torch.cat((x.unsqueeze(2),cities),2)
+    #y = WW[:,:,:,1]
+    #WW = Variable(WW).type(dtype)
+    #x = Variable(x).type(dtype)
+    #y = Variable(y).type(dtype)
+    #print(WW, x, y)
+    #partial_pred = Tsp((WW,x,y))
+    #partial_pred = partial_pred * Variable(Phi)
+    #print(input[0], input[1], partial_pred)
+    entradaY = oracle_split(W.data, target[0], perms)
+    pred = Merge((input[0], input[1], entradaY.float()))
+    return 0, 0, Variable(torch.zeros(batch_size,N)).type(dtype), pred
+
+def fake_split_b(W, mat_perm, perms, i):
+    N = mat_perm.size(-1)
+    def index(k):
+        return (N+k+i)%N
+    n2 = N // 2
+    pre0 = math.floor(perms[index(-1)]+0.5)
+    exc0 = math.floor(perms[index(0)]+0.5)
+    pre10 = math.floor(perms[index(n2-1)]+0.5)
+    exc10 = math.floor(perms[index(n2)]+0.5)
+    return pre0,exc0,pre10,exc10
+
+def fake_split(W, mat_perm, perms, i):    
+    N = mat_perm.size(-1)
+    def index(k):
+        return (N+k+i)%N
+    
+    bs = mat_perm.size(0)
+    n2 = N // 2
+    out = mat_perm.clone()
+    for b in range(bs):
+        pre0 = math.floor(perms[b,index(-1)]+0.5)
+        exc0 = math.floor(perms[b,index(0)]+0.5)
+        pre10 = math.floor(perms[b,index(n2-1)]+0.5)
+        exc10 = math.floor(perms[b,index(n2)]+0.5)
+        out[b,pre0,exc0] = 0
+        out[b,exc0,pre0] = 0
+        out[b,pre0,exc10] = 1
+        out[b,exc10,pre0] = 1
+        out[b,pre10,exc0] = 1
+        out[b,exc0,pre10] = 1
+        out[b,pre10,exc10] = 0
+        out[b,exc10,pre10] = 0
+    return out
+
+def oracle_split(W, mat_perm, perms):
+    N = mat_perm.size(-1)
+    def index(k):
+        return (N+k+i)%N
+    
+    bs = mat_perm.size(0)
+    out = mat_perm.clone()
+    for b in range(bs):
+        costos = torch.zeros(N//2).type(dtype)
+        for i in range(N // 2):
+            pre0,exc0,pre10,exc10 = fake_split_b(W[b],mat_perm[b],perms[b],i)
+            costos[i] = W[b,pre0,exc0] + W[b,pre10,exc10] - W[b,pre0,exc10] - W[b,pre10,exc0]
+        imax = costos.max(0)[1]
+        pre0,exc0,pre10,exc10 = fake_split_b(W[b],mat_perm[b],perms[b],imax[0])
+        out[b,pre0,exc0] = 0
+        out[b,exc0,pre0] = 0
+        out[b,pre0,exc10] = 1
+        out[b,exc10,pre0] = 1
+        out[b,pre10,exc0] = 1
+        out[b,exc0,pre10] = 1
+        out[b,pre10,exc10] = 0
+        out[b,exc10,pre10] = 0
+    return out
 
 
 if __name__ == '__main__':
@@ -215,7 +281,7 @@ if __name__ == '__main__':
     gen.load_dataset()
     
     clip_grad = 40.0
-    iterations = 5000
+    iterations = 50000
     batch_size = 20
     num_features = 10
     num_layers = 5
@@ -235,25 +301,10 @@ if __name__ == '__main__':
     
     for it in range(iterations):
         start = time.time()
-        sample = gen.sample_batch(batch_size, cuda=torch.cuda.is_available())
-        input, W, WTSP, labels, target, cities, perms, costs = extract(sample)
-        #print(target[0])
-        #scores, probs = Split(input)
-        #variance = compute_variance(probs)
-        #sample, log_probs_samples = sample_one(probs, mode='train')
-        #WW, x, Phi = compute_operators(W.data, sample, J)
-        #x = torch.cat((x.unsqueeze(2),cities),2)
-        #y = WW[:,:,:,1]
-        #WW = Variable(WW).type(dtype)
-        #x = Variable(x).type(dtype)
-        #y = Variable(y).type(dtype)
-        #print(WW, x, y)
-        #partial_pred = Tsp((WW,x,y))
-        #partial_pred = partial_pred * Variable(Phi)
-        #print(input[0], input[1], partial_pred)
-        pred = Merge((input[0], input[1], target[0].float()))
-        loss, loss_reinforce = compute_loss(pred, target, 
-                                            Variable(torch.zeros(batch_size,N)).type(dtype))
+        batch = gen.sample_batch(batch_size, cuda=torch.cuda.is_available())
+        input, W, WTSP, labels, target, cities, perms, costs = extract(batch)
+        probs, variance, log_probs_samples, pred = execute(Split, Tsp, Merge, batch)
+        loss, loss_reinforce = compute_loss(pred, target, log_probs_samples)
         #loss_reinforce -= variance*rf
         #Split.zero_grad()
         #loss_reinforce.backward()
