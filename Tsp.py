@@ -8,7 +8,10 @@ from torch.autograd import Variable
 import numpy as np
 from data_generator import Generator
 from model import Split_GNN, GNN
+from Logger import Logger
+import utils
 import os
+import time
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 
@@ -38,6 +41,15 @@ CEL = nn.CrossEntropyLoss()
 BCE = nn.BCELoss()
 template = '{:<10} {:<10.5f} {:<10.5f} {:<10.5f} '
 
+template_train1 = '{:<10} {:<10} {:<10} {:<10} {:<10} {:<10} {:<10} '
+template_train2 = ('{:<10} {:<10} {:<10.5f} {:<10.5f} {:<10.5f} {:<10.5f}'
+                   '{:<10.3f} \n')
+template_test1 = '{:<10} {:<10} {:<10} {:<10} {:<10} {:<10} {:<10}'
+template_test2 = '{:<10} {:<10} {:<10.5f} {:<10.5f} {:<10.5f} {:<10} {:<10.5f}'
+info_train = ['TRAIN', 'iteration', 'loss', 'accuracy', 'cost', 'loss_re',
+              'elapsed']
+info_test = ['TEST', 'iteration', 'loss', 'accuracy', 'cost',
+             'beam_size', 'elapsed']
 
 
 def extract(sample):
@@ -56,7 +68,7 @@ def sample_one(probs, mode='train'):
         rand = torch.zeros(*probs.size()).type(dtype)
         nn.init.uniform(rand)
     else:
-        rand = torch.ones_like(probs).type(dtype) / 2
+        rand = torch.ones(*probs.size()).type(dtype) / 2
     sample = (probs > Variable(rand)).type(dtype)
     log_probs_samples = (sample*torch.log(probs) + (1-sample)*torch.log(1-probs)).sum(1)
     return sample.data, log_probs_samples
@@ -150,13 +162,55 @@ def compute_variance(probs):
     variance = ((dif*dif).sum(1).sum(0)) / (N*probs.size(0))
     return variance
 
+def compute_test_cost(pred, W, beam_size):
+    utils.beamsearch_hamcycle(pred.data, W.data, beam_size=beam_size)
+
+def test(split, tsp, merge, logger, gen, beam_size=2):
+    iterations_test = int(gen.num_examples_test / batch_size)
+    # siamese_gnn.eval()
+    for it in range(iterations_test):
+        start = time.time()
+        batch = gen.sample_batch(batch_size, is_training=False, it=it,
+                                 cuda=torch.cuda.is_available())
+        input, W, WTSP, labels, target, cities, perms, costs = extract(batch)
+        scores, probs = split(input)
+        sample, log_probs_samples = sample_one(probs, mode='test')
+        WW, x, Phi = compute_operators(W.data, sample, J)
+        x = torch.cat((x.unsqueeze(2),cities),2)
+        y = WW[:,:,:,1]
+        WW = Variable(WW).type(dtype)
+        x = Variable(x).type(dtype)
+        y = Variable(y).type(dtype)
+        #print(WW, x, y)
+        partial_pred = tsp((WW,x,y))
+        partial_pred = partial_pred * Variable(Phi)
+        #print(input[0], input[1], partial_pred)
+        pred = merge((input[0], input[1], target[0].float()))
+        loss, loss_split = compute_loss(pred, target, log_probs_samples)
+        #loss_split -= variance*rf
+        
+        last = (it == iterations_test-1)
+        logger.add_test_accuracy(pred, labels, perms, W, cities, costs,
+                                 last=last, beam_size=beam_size)
+        logger.add_test_loss(loss, last=last)
+        elapsed = time.time() - start
+        if not last and it % 100 == 0:
+            loss = loss.data.cpu().numpy()[0]
+            out = ['---', it, loss, logger.accuracy_test_aux[-1], 
+                   logger.cost_test_aux[-1], beam_size, elapsed]
+            print(template_test1.format(*info_test))
+            print(template_test2.format(*out))
+    print('TEST COST: {} | TEST ACCURACY {}\n'
+          .format(logger.cost_test[-1], logger.accuracy_test[-1]))
+
+
 
 if __name__ == '__main__':
-    path_dataset = './dataset/broma/'
+    path_dataset = './dataset/'
     gen = Generator(path_dataset, './LKH/')
     N = 20
-    gen.num_examples_train = 200
-    gen.num_examples_test = 10
+    gen.num_examples_train = 20000
+    gen.num_examples_test = 1000
     gen.N = N
     gen.load_dataset()
     
@@ -167,6 +221,9 @@ if __name__ == '__main__':
     num_layers = 5
     J = 4
     rf = 10.0 # regularization factor
+    beam_size = 20
+    
+    logger = Logger('./logs')
     
     Split = Split_GNN(batch_size, num_features, num_layers, J+2, dim_input=3)
     Tsp = GNN(num_features, num_layers, J+2, dim_input=3)
@@ -177,46 +234,55 @@ if __name__ == '__main__':
     optimizer_merge = optim.Adamax(Merge.parameters(), lr=1e-3)
     
     for it in range(iterations):
+        start = time.time()
         sample = gen.sample_batch(batch_size, cuda=torch.cuda.is_available())
         input, W, WTSP, labels, target, cities, perms, costs = extract(sample)
-        scores, probs = Split(input)
-        variance = compute_variance(probs)
-        sample, log_probs_samples = sample_one(probs, mode='train')
-        WW, x, Phi = compute_operators(W.data, sample, J)
-        x = torch.cat((x.unsqueeze(2),cities),2)
-        y = WW[:,:,:,1]
-        WW = Variable(WW).type(dtype)
-        x = Variable(x).type(dtype)
-        y = Variable(y).type(dtype)
+        #print(target[0])
+        #scores, probs = Split(input)
+        #variance = compute_variance(probs)
+        #sample, log_probs_samples = sample_one(probs, mode='train')
+        #WW, x, Phi = compute_operators(W.data, sample, J)
+        #x = torch.cat((x.unsqueeze(2),cities),2)
+        #y = WW[:,:,:,1]
+        #WW = Variable(WW).type(dtype)
+        #x = Variable(x).type(dtype)
+        #y = Variable(y).type(dtype)
         #print(WW, x, y)
-        partial_pred = Tsp((WW,x,y))
-        partial_pred = partial_pred * Variable(Phi)
+        #partial_pred = Tsp((WW,x,y))
+        #partial_pred = partial_pred * Variable(Phi)
         #print(input[0], input[1], partial_pred)
-        pred = Merge((input[0], input[1], partial_pred))
-        loss_supervised, loss_reinforce = compute_loss(pred, target, log_probs_samples)
-        loss_reinforce -= variance*rf
-        Split.zero_grad()
-        loss_reinforce.backward()
-        nn.utils.clip_grad_norm(Split.parameters(), clip_grad)
-        optimizer_split.step()
-        Tsp.zero_grad()
+        pred = Merge((input[0], input[1], target[0].float()))
+        loss, loss_reinforce = compute_loss(pred, target, 
+                                            Variable(torch.zeros(batch_size,N)).type(dtype))
+        #loss_reinforce -= variance*rf
+        #Split.zero_grad()
+        #loss_reinforce.backward()
+        #nn.utils.clip_grad_norm(Split.parameters(), clip_grad)
+        #optimizer_split.step()
+        #Tsp.zero_grad()
         Merge.zero_grad()
-        loss_supervised.backward()
-        nn.utils.clip_grad_norm(Tsp.parameters(), clip_grad)
+        loss.backward()
+        #nn.utils.clip_grad_norm(Tsp.parameters(), clip_grad)
         nn.utils.clip_grad_norm(Merge.parameters(), clip_grad)
-        optimizer_tsp.step()
+        #optimizer_tsp.step()
         optimizer_merge.step()
+        logger.add_train_loss(loss)
+        logger.add_train_accuracy(pred, labels, W)
+        elapsed = time.time() - start
         
         if it%50 == 0:
-            acc = compute_accuracy(pred, labels)
-            out = [it, loss_reinforce.data[0], loss_supervised.data[0], acc]
-            print(template.format(*out))
-            print(variance)
+            loss = loss.data.cpu().numpy()[0]
+            loss_reinforce = loss_reinforce.data.cpu().numpy()[0]
+            out = ['---', it, loss, logger.accuracy_train[-1],
+                   logger.cost_train[-1], loss_reinforce, elapsed]
+            print(template_train1.format(*info_train))
+            print(template_train2.format(*out))
+            #print(variance)
             #print(probs[0])
-            #print('iteracio {}:\nloss_r={}\nloss_s={}'.format(it,loss_reinforce.data[0],loss_supervised.data[0]))
-            plot_clusters(it, probs[0], cities[0])
+            #plot_clusters(it, probs[0], cities[0])
             #os.system('eog ./plots/clustering/clustering_it_{}.png'.format(it))
-        
+        if it%200 == 0 and it > 0:
+            test(Split, Tsp, Merge, logger, gen, beam_size=beam_size)
         
         
         
