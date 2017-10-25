@@ -57,8 +57,8 @@ class Logger(object):
                 self.args[str(arg)] = getattr(args, arg)
 
     
-    def save_model(self, split, tsp, merge):
-        save_dir = os.path.join(self.path, 'parameters/')
+    def save_model(self, path, split, tsp, merge):
+        save_dir = os.path.join(path, 'parameters/')
         # Create directory if necessary
         try:
             os.stat(save_dir)
@@ -77,11 +77,11 @@ class Logger(object):
         path2 = os.path.join(parameters_path, 'parameters/tsp.pt')
         path3 = os.path.join(parameters_path, 'parameters/merge.pt')
         if os.path.exists(path1) and os.path.exists(path2) and os.path.exists(path3):
-            print('GNN successfully loaded from {}'.format(path))
+            print('GNN successfully loaded from {}, {}, {}'.format(path1, path2, path3))
             return torch.load(path1), torch.load(path2), torch.load(path3)
         else:
-            raise ValueError('Parameter path {} does not exist.'
-                             .format(path))
+            raise ValueError('Parameter paths {}, {}, {} does not exist.'
+                             .format(path1, path2, path3))
     
 
     def plot_example(self, Cities, num_plots=1):
@@ -131,13 +131,13 @@ class Logger(object):
             self.loss_test_aux = []
 
     def add_train_accuracy(self, probs, gt):
-        accuracy = utils.compute_accuracy(probs, gt)
+        accuracy = utils.compute_accuracy(probs, gt)[1]
         #costs = utils.compute_mean_cost(pred, W)
         self.accuracy_train.append(accuracy)
         #self.cost_train.append(sum(costs) / float(len(costs)))
 
     def add_test_accuracy(self, probs, gt, last=False):
-        accuracy = utils.compute_accuracy(probs, gt)
+        accuracy = utils.compute_accuracy(probs, gt)[1]
         
         self.accuracy_test_aux.append(accuracy)
         #self.cost_test_aux.append(np.array(costs.cpu().numpy()).mean())

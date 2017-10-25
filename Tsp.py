@@ -312,41 +312,46 @@ if __name__ == '__main__':
     optimizer_tsp = optim.Adamax(Tsp.parameters(), lr=1e-3)
     optimizer_merge = optim.Adamax(Merge.parameters(), lr=1e-3)
     
-    for it in range(iterations):
-        start = time.time()
-        batch = gen.sample_batch(batch_size, cuda=torch.cuda.is_available())
-        input, W, WTSP, labels, target, cities, perms, costs = extract(batch)
-        probs, ground_truth, loss_split = execute_split_train(Split, batch)
-        Split.zero_grad()
-        loss_split.backward()
-        nn.utils.clip_grad_norm(Split.parameters(), clip_grad)
-        optimizer_split.step()
-        #Tsp.zero_grad()
-        #Merge.zero_grad()
-        #loss.backward()
-        #nn.utils.clip_grad_norm(Tsp.parameters(), clip_grad)
-        #nn.utils.clip_grad_norm(Merge.parameters(), clip_grad)
-        #optimizer_tsp.step()
-        #optimizer_merge.step()
-        logger.add_train_loss(loss_split)
-        logger.add_train_accuracy(probs.data, ground_truth)
-        elapsed = time.time() - start
-        
-        if it%50 == 0:
-            loss_split = loss_split.data.cpu().numpy()[0]
-            out = ['---', it, loss_split, logger.accuracy_train[-1],
-                   0, 0, elapsed]
-            print(template_train1.format(*info_train))
-            print(template_train2.format(*out))
-            #print(variance)
-            #print(probs[0])
-            #plot_clusters(it, probs[0], cities[0])
-            #os.system('eog ./plots/clustering/clustering_it_{}.png'.format(it))
-        if it%200 == 0 and it > 0:
-            test(Split, logger, gen)
-        if it%1000 == 0 and it > 0:
-            logger.save_model(Split,Tsp,Merge)
-        
+    mode = 'test'
+    
+    if mode == 'train':
+        for it in range(iterations):
+            start = time.time()
+            batch = gen.sample_batch(batch_size, cuda=torch.cuda.is_available())
+            input, W, WTSP, labels, target, cities, perms, costs = extract(batch)
+            probs, ground_truth, loss_split = execute_split_train(Split, batch)
+            Split.zero_grad()
+            loss_split.backward()
+            nn.utils.clip_grad_norm(Split.parameters(), clip_grad)
+            optimizer_split.step()
+            #Tsp.zero_grad()
+            #Merge.zero_grad()
+            #loss.backward()
+            #nn.utils.clip_grad_norm(Tsp.parameters(), clip_grad)
+            #nn.utils.clip_grad_norm(Merge.parameters(), clip_grad)
+            #optimizer_tsp.step()
+            #optimizer_merge.step()
+            logger.add_train_loss(loss_split)
+            logger.add_train_accuracy(probs.data, ground_truth)
+            elapsed = time.time() - start
+            
+            if it%50 == 0:
+                loss_split = loss_split.data.cpu().numpy()[0]
+                out = ['---', it, loss_split, logger.accuracy_train[-1],
+                    0, 0, elapsed]
+                print(template_train1.format(*info_train))
+                print(template_train2.format(*out))
+                #print(variance)
+                #print(probs[0])
+                #plot_clusters(it, probs[0], cities[0])
+                #os.system('eog ./plots/clustering/clustering_it_{}.png'.format(it))
+            if it%200 == 0 and it > 0:
+                test(Split, logger, gen)
+            if it%1000 == 0 and it > 0:
+                logger.save_model('./logs',Split,Tsp,Merge)
+    else:
+        Split, Tsp, Merge = logger.load_model('./logs')
+        test(Split, logger, gen)
     
     
     

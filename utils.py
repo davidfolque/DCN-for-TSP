@@ -34,10 +34,11 @@ else:
 
 def compute_accuracy(probs, gt):
     sample = (probs > 0.5).type(dtype)
-    acc1 = torch.eq(sample,gt).min(1)[0].type(dtype)
-    acc2 = torch.eq(1-sample,gt).min(1)[0].type(dtype)
-    accuracy = torch.max(acc1,acc2).mean(0).squeeze()
-    return accuracy[0]
+    eq1 = torch.eq(sample,gt).type(dtype)
+    eq2 = torch.eq(1-sample,gt).type(dtype)
+    strict_accuracy = torch.max(eq1.min(1)[0],eq2.min(1)[0]).mean(0).squeeze()
+    relaxed_accuracy = torch.max(eq1.mean(1),eq2.mean(1)).mean(0).squeeze()
+    return strict_accuracy[0], relaxed_accuracy[0]
 
 def compute_mean_cost(pred, W):
     # cost estimator for training time
