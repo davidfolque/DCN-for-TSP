@@ -287,10 +287,11 @@ def execute_split_train(Split, batch):
 if __name__ == '__main__':
     path_dataset = './dataset/'
     gen = Generator(path_dataset, './LKH/')
-    N = 20
+    #N = 20
     gen.num_examples_train = 20000
-    gen.num_examples_test = 1000
-    gen.N = N
+    gen.num_examples_test = 10
+    gen.N_train = 20
+    gen.N_test = 40
     gen.load_dataset()
     
     clip_grad = 40.0

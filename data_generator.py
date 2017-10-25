@@ -45,7 +45,8 @@ class Generator(TSP):
         self.data_train = []
         self.data_test = []
         self.dual = False
-        self.N = 20
+        self.N_train = 20
+        self.N_test = 20
         self.J = 4
         self.mode = mode
         self.sym = True
@@ -130,22 +131,6 @@ class Generator(TSP):
                 W[i, i+1] = 1
         return W
 
-    def create_dual_embeddings(self, cities):
-        def l2_dist(x, y):
-            return math.ceil(np.sqrt(np.square(x - y).sum()))
-        def l1_dist(x, y):
-            return np.abs(x - y).sum()
-        x = []
-        for i in range(0, self.N-1):
-            for j in range(i+1, self.N):
-                city1 = cities[i]*self.C
-                city2 = cities[j]*self.C
-                dist = l2_dist(city1, city2)/float(self.C)
-                dist = np.sqrt(2) - float(dist)
-                x.append(dist)
-        x = np.reshape(np.array(x), [-1,1])
-        return x
-
     def create_adj(self, Cities):
         cities = Cities.cpu().numpy()
         N = cities.shape[1]
@@ -182,10 +167,10 @@ class Generator(TSP):
         target = target[rand_perm]
         return points, target
 
-    def compute_example(self, i):
+    def compute_example(self, N, i):
         example = {}
         if self.mode == 'CEIL_2D':
-            cities = self.cities_generator(self.N)
+            cities = self.cities_generator(N)
             if i == 0 and self.dual:
                 W = self.adj_from_coord(cities)
                 WW, x = self.compute_operators(W)
@@ -195,54 +180,51 @@ class Generator(TSP):
                 WW, x = self.compute_operators(W)
                 example['WW'] = WW
             # add_coordinates
-            if self.dual:
-                x = self.create_dual_embeddings(cities)
-            else:
-                x = np.concatenate([x, cities], axis=1)
+            x = np.concatenate([x, cities], axis=1)
             example['cities'] = cities
             example['x'] = x
             # compute hamiltonian cycle
-            self.save_solverformat(cities, self.N, mode='CEIL_2D')
+            self.save_solverformat(cities, N, mode='CEIL_2D')
         elif self.mode == 'EXPLICIT':
-            W = self.adj_generator(self.N)
+            W = self.adj_generator(N)
             WW, x = self.compute_operators(W)
             example['WW'], example['x'] = WW, x
             # compute hamiltonian cycle
-            self.save_solverformat(W, self.N, mode='EXPLICIT')
+            self.save_solverformat(W, N, mode='EXPLICIT')
             raise ValueError('Mode {} not yet supported.'.format(mode))
         else:
             raise ValueError('Mode {} not supported.'.format(mode))
-        self.tsp_solver(self.N)
+        self.tsp_solver(N)
         # print(cities)
-        ham_cycle, length_cycle = self.extract_path(self.N)
+        ham_cycle, length_cycle = self.extract_path(N)
         example['HAM_cycle'] = ham_cycle
         cost = float(length_cycle)/float(self.C)
-        example['Length_cycle'] = np.sqrt(2)*self.N - cost
-        example['WTSP'] = self.perm_to_adj(ham_cycle, self.N)
-        example['labels'] = self.perm_to_labels(ham_cycle, self.N,
+        example['Length_cycle'] = np.sqrt(2)*N - cost
+        example['WTSP'] = self.perm_to_adj(ham_cycle, N)
+        example['labels'] = self.perm_to_labels(ham_cycle, N,
                                                 sym=self.sym)
         example['perm'] = ham_cycle
         return example
 
     def create_dataset_train(self):
         for i in range(self.num_examples_train):
-            example = self.compute_example(i)
+            example = self.compute_example(self.N_train, i)
             self.data_train.append(example)
             if i % 100 == 0:
                 print('Train example {} of length {} computed.'
-                      .format(i, self.N))
+                      .format(i, self.N_train))
 
     def create_dataset_test(self):
         for i in range(self.num_examples_test):
-            example = self.compute_example(i)
+            example = self.compute_example(self.N_test,i)
             self.data_test.append(example)
             if i % 100 == 0:
                 print('Test example {} of length {} computed.'
-                      .format(i, self.N))
+                      .format(i, self.N_test))
 
     def load_dataset(self):
         # load train dataset
-        filename = 'TSP{}{}train_dual_{}.np'.format(self.N, self.mode,
+        filename = 'TSP{}{}train_dual_{}.np'.format(self.N_train, self.mode,
                                                     self.dual)
         path = os.path.join(self.path_dataset, filename)
         if os.path.exists(path):
@@ -254,7 +236,7 @@ class Generator(TSP):
             print('Saving training datatset at {}'.format(path))
             np.save(open(path, 'wb'), self.data_train)
         # load test dataset
-        filename = 'TSP{}{}test_dual_{}.np'.format(self.N, self.mode,
+        filename = 'TSP{}{}test_dual_{}.np'.format(self.N_test, self.mode,
                                                    self.dual)
         path = os.path.join(self.path_dataset, filename)
         if os.path.exists(path):
@@ -268,26 +250,30 @@ class Generator(TSP):
 
     def sample_batch(self, num_samples, is_training=True, it=0,
                      cuda=True, volatile=False):
-        WW_size = self.data_train[0]['WW'].shape
-        x_size = self.data_train[0]['x'].shape
+        if is_training:
+            dataset = self.data_train
+            N = self.N_train
+        else:
+            dataset = self.data_test
+            N = self.N_test
+        
+        WW_size = dataset[0]['WW'].shape
+        x_size = dataset[0]['x'].shape
 
         # define batch elements
         WW = torch.zeros(num_samples, *WW_size)
         X = torch.zeros(num_samples, *x_size)
-        Y = torch.zeros(num_samples, self.N, self.N)
-        WTSP = torch.zeros(num_samples, self.N, self.N)
+        Y = torch.zeros(num_samples, N, N)
+        WTSP = torch.zeros(num_samples, N, N)
         if self.sym:
-            P = torch.zeros(num_samples, self.N, 2)
+            P = torch.zeros(num_samples, N, 2)
         else:
-            P = torch.zeros(num_samples, self.N)
-        Cities = torch.zeros((num_samples, self.N, 2))
-        Perm = torch.zeros((num_samples, self.N))
+            P = torch.zeros(num_samples, N)
+        Cities = torch.zeros((num_samples, N, 2))
+        Perm = torch.zeros((num_samples, N))
         Cost = np.zeros(num_samples)
         # fill batch elements 
-        if is_training:
-            dataset = self.data_train
-        else:
-            dataset = self.data_test
+        
         for b in range(num_samples):
             if is_training:
                 # random element in the dataset
