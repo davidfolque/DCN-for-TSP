@@ -56,27 +56,33 @@ class Logger(object):
                 file.write(str(arg) + ' : ' + str(getattr(args, arg)) + '\n')
                 self.args[str(arg)] = getattr(args, arg)
 
-    '''
-    def save_model(self, model):
+    
+    def save_model(self, split, tsp, merge):
         save_dir = os.path.join(self.path, 'parameters/')
         # Create directory if necessary
         try:
             os.stat(save_dir)
         except:
             os.mkdir(save_dir)
-        path = os.path.join(save_dir, 'gnn.pt')
-        torch.save(model, path)
+        path = os.path.join(save_dir, 'split.pt')
+        torch.save(split, path)
+        path = os.path.join(save_dir, 'tsp.pt')
+        torch.save(tsp, path)
+        path = os.path.join(save_dir, 'merge.pt')
+        torch.save(merge, path)
         print('Model Saved.')
 
     def load_model(self, parameters_path):
-        path = os.path.join(parameters_path, 'parameters/gnn.pt')
-        if os.path.exists(path):
+        path1 = os.path.join(parameters_path, 'parameters/split.pt')
+        path2 = os.path.join(parameters_path, 'parameters/tsp.pt')
+        path3 = os.path.join(parameters_path, 'parameters/merge.pt')
+        if os.path.exists(path1) and os.path.exists(path2) and os.path.exists(path3):
             print('GNN successfully loaded from {}'.format(path))
-            return torch.load(path)
+            return torch.load(path1), torch.load(path2), torch.load(path3)
         else:
             raise ValueError('Parameter path {} does not exist.'
                              .format(path))
-    '''
+    
 
     def plot_example(self, Cities, num_plots=1):
         num_plots = min(num_plots, Cities.size(0))

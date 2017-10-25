@@ -344,9 +344,8 @@ if __name__ == '__main__':
             #os.system('eog ./plots/clustering/clustering_it_{}.png'.format(it))
         if it%200 == 0 and it > 0:
             test(Split, logger, gen)
-        
-        
-        
+        if it%1000 == 0 and it > 0:
+            logger.save_model(Split,Tsp,Merge)
         
     
     
