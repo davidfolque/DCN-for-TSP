@@ -185,7 +185,7 @@ class Generator(TSP):
     def compute_example(self, i):
         example = {}
         if self.mode == 'CEIL_2D':
-            cities,_ = self.gaussian_example(self.N, 2)
+            cities = self.cities_generator(self.N)
             if i == 0 and self.dual:
                 W = self.adj_from_coord(cities)
                 WW, x = self.compute_operators(W)

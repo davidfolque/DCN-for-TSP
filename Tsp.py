@@ -285,7 +285,7 @@ def execute_split_train(Split, batch):
 
 
 if __name__ == '__main__':
-    path_dataset = './dataset/2clusters/'
+    path_dataset = './dataset/'
     gen = Generator(path_dataset, './LKH/')
     N = 20
     gen.num_examples_train = 20000
