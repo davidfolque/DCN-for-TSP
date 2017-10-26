@@ -32,13 +32,18 @@ else:
     dtype_l = torch.LongTensor
     torch.manual_seed(0)
 
-def compute_accuracy(probs, gt):
-    sample = (probs > 0.5).type(dtype)
-    eq1 = torch.eq(sample,gt).type(dtype)
-    eq2 = torch.eq(1-sample,gt).type(dtype)
-    strict_accuracy = torch.max(eq1.min(1)[0],eq2.min(1)[0]).mean(0).squeeze()
-    relaxed_accuracy = torch.max(eq1.mean(1),eq2.mean(1)).mean(0).squeeze()
-    return strict_accuracy[0], relaxed_accuracy[0]
+def compute_accuracy(pred, labels):
+    pred = torch.topk(pred, 2, dim=2)[1]
+    p = torch.sort(pred, 2)[0]
+    l = torch.sort(labels, 2)[0]
+    # print('pred', p)
+    # print('labels', l)
+    # print(torch.eq(p, l).min(2)[0].type(dtype).size())
+    error = 1 - torch.eq(p, l).min(2)[0].type(dtype)
+    frob_norm = error.mean(1)
+    accuracy = 1 - frob_norm
+    accuracy = accuracy.mean(0).squeeze()
+    return accuracy.data.cpu().numpy()[0]
 
 def compute_mean_cost(pred, W):
     # cost estimator for training time

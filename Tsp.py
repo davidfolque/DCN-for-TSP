@@ -175,10 +175,11 @@ def test(split, logger, gen):
                                 cuda=torch.cuda.is_available())
         input, W, WTSP, labels, target, cities, perms, costs = extract(batch)
         
-        probs, ground_truth, loss = execute_split_train(split, batch)
-        
+        pred = Tsp(input)
+        loss = compute_loss(pred, target, Variable(torch.zeros(batch_size).type(dtype)))[0]
+            
         last = (it == iterations_test-1)
-        logger.add_test_accuracy(probs.data, ground_truth, last=last)
+        logger.add_test_accuracy(pred, labels, perms, W, cities, costs, last=last)
         logger.add_test_loss(loss, last=last)
         elapsed = time.time() - start
         if not last and it % 100 == 0:
@@ -188,7 +189,7 @@ def test(split, logger, gen):
             print(template_test1.format(*info_test))
             print(template_test2.format(*out))
     print('TEST COST: {} | TEST ACCURACY {}\n'
-          .format(0, logger.accuracy_test[-1]))
+          .format(logger.cost_test[-1], logger.accuracy_test[-1]))
 
 def execute(Split, Tsp, Merge, batch):
     input, W, WTSP, labels, target, cities, perms, costs = extract(batch)
@@ -289,9 +290,9 @@ if __name__ == '__main__':
     gen = Generator(path_dataset, './LKH/')
     #N = 20
     gen.num_examples_train = 20000
-    gen.num_examples_test = 10
+    gen.num_examples_test = 1000
     gen.N_train = 20
-    gen.N_test = 40
+    gen.N_test = 20
     gen.load_dataset()
     
     clip_grad = 40.0
@@ -313,32 +314,34 @@ if __name__ == '__main__':
     optimizer_tsp = optim.Adamax(Tsp.parameters(), lr=1e-3)
     optimizer_merge = optim.Adamax(Merge.parameters(), lr=1e-3)
     
-    mode = 'test'
-    
+    mode = 'train'
+    Split, Tsp, Merge = logger.load_model('./logs')
     if mode == 'train':
         for it in range(iterations):
             start = time.time()
             batch = gen.sample_batch(batch_size, cuda=torch.cuda.is_available())
             input, W, WTSP, labels, target, cities, perms, costs = extract(batch)
-            probs, ground_truth, loss_split = execute_split_train(Split, batch)
-            Split.zero_grad()
-            loss_split.backward()
-            nn.utils.clip_grad_norm(Split.parameters(), clip_grad)
-            optimizer_split.step()
-            #Tsp.zero_grad()
+            #probs, ground_truth, loss_split = execute_split_train(Split, batch)
+            #Split.zero_grad()
+            #loss_split.backward()
+            #nn.utils.clip_grad_norm(Split.parameters(), clip_grad)
+            #optimizer_split.step()
+            pred = Tsp(input)
+            loss = compute_loss(pred, target, Variable(torch.zeros(batch_size).type(dtype)))[0]
+            Tsp.zero_grad()
             #Merge.zero_grad()
-            #loss.backward()
-            #nn.utils.clip_grad_norm(Tsp.parameters(), clip_grad)
+            loss.backward()
+            nn.utils.clip_grad_norm(Tsp.parameters(), clip_grad)
             #nn.utils.clip_grad_norm(Merge.parameters(), clip_grad)
-            #optimizer_tsp.step()
+            optimizer_tsp.step()
             #optimizer_merge.step()
-            logger.add_train_loss(loss_split)
-            logger.add_train_accuracy(probs.data, ground_truth)
+            logger.add_train_loss(loss)
+            logger.add_train_accuracy(pred, labels)
             elapsed = time.time() - start
             
-            if it%50 == 0:
-                loss_split = loss_split.data.cpu().numpy()[0]
-                out = ['---', it, loss_split, logger.accuracy_train[-1],
+            if it%100 == 0:
+                loss = loss.data.cpu().numpy()[0]
+                out = ['---', it, loss, logger.accuracy_train[-1],
                     0, 0, elapsed]
                 print(template_train1.format(*info_train))
                 print(template_train2.format(*out))
@@ -346,7 +349,7 @@ if __name__ == '__main__':
                 #print(probs[0])
                 #plot_clusters(it, probs[0], cities[0])
                 #os.system('eog ./plots/clustering/clustering_it_{}.png'.format(it))
-            if it%200 == 0 and it > 0:
+            if it%2000 == 0 and it > 0:
                 test(Split, logger, gen)
             if it%1000 == 0 and it > 0:
                 logger.save_model('./logs',Split,Tsp,Merge)
