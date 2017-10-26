@@ -32,16 +32,16 @@ parser.add_argument('--num_examples_test', nargs='?', const=1, type=int,
                     default=int(1000))
 parser.add_argument('--iterations', nargs='?', const=1, type=int,
                     default=int(10e6))
-parser.add_argument('--batch_size', nargs='?', const=1, type=int, default=1)
-parser.add_argument('--beam_size', nargs='?', const=1, type=int, default=2)
+parser.add_argument('--batch_size', nargs='?', const=1, type=int, default=32)
+parser.add_argument('--beam_size', nargs='?', const=1, type=int, default=40)
 parser.add_argument('--mode', nargs='?', const=1, type=str, default='train')
 parser.add_argument('--path_dataset', nargs='?', const=1, type=str, default='./dataset/')
 parser.add_argument('--path_load_split', nargs='?', const=1, type=str, default='')
 parser.add_argument('--path_load_tsp', nargs='?', const=1, type=str, default='')
 parser.add_argument('--path_load_merge', nargs='?', const=1, type=str, default='')
 parser.add_argument('--path_save_model', nargs='?', const=1, type=str, default='./saved_model/')
-parser.add_argument('--path_logger', nargs='?', const=1, type=str, default='')
-parser.add_argument('--path_tsp', nargs='?', const=1, type=str, default='')
+parser.add_argument('--path_logger', nargs='?', const=1, type=str, default='./logs/')
+parser.add_argument('--path_tsp', nargs='?', const=1, type=str, default='./LKH/')
 parser.add_argument('--print_freq', nargs='?', const=1, type=int, default=100)
 parser.add_argument('--test_freq', nargs='?', const=1, type=int, default=2000)
 parser.add_argument('--save_freq', nargs='?', const=1, type=int, default=2000)
@@ -53,7 +53,7 @@ parser.add_argument('--clip_grad_norm', nargs='?', const=1, type=float,
 ###############################################################################
 
 parser.add_argument('--num_features', nargs='?', const=1, type=int,
-                    default=50)
+                    default=20)
 parser.add_argument('--num_layers', nargs='?', const=1, type=int,
                     default=20)
 parser.add_argument('--J', nargs='?', const=1, type=int, default=4)
@@ -317,17 +317,16 @@ if __name__ == '__main__':
     clip_grad = 40.0
     iterations = 50000
     batch_size = 20
-    num_features = 10
-    num_layers = 5
+    num_features = 20
+    num_layers = 20
     J = 4
-    rf = 10.0 # regularization factor
-    beam_size = 20
+    beam_size = 40
     
     logger = Logger('./logs')
     logger.write_settings(args)
     Dcn = DCN(batch_size, num_features, num_layers, J, 3, args.clip_grad_norm, logger)
     Dcn.set_dataset(args.path_dataset, num_examples_train, num_examples_test, N_train, N_test)
-    Dcn.load_split(args.path_load_split)
+    #Dcn.load_split(args.path_load_split)
     #Dcn.load_tsp(args.path_save_model)
     #Dcn.load_merge(args.path_save_model)
     Dcn.train(args.iterations, args.print_freq, args.test_freq, args.save_freq, args.path_save_model)
