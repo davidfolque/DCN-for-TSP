@@ -82,41 +82,41 @@ class Logger(object):
                              .format(path))
     
 
-    def plot_example(self, Cities, num_plots=1):
+    def plot_example(self, Paths, costs, oracle_costs, Perms, Cities, num_plots=1):
         num_plots = min(num_plots, Cities.size(0))
         for fig in range(num_plots):
-            #cost = costs[fig]
-            #oracle_cost = oracle_costs[fig]
-            #predicted_path = Paths[fig].cpu().numpy()
-            #oracle_path = Perms[fig].cpu().numpy()
+            cost = costs[fig]
+            oracle_cost = oracle_costs[fig]
+            predicted_path = Paths[fig].cpu().numpy()
+            oracle_path = Perms[fig].cpu().numpy()
             cities = Cities[fig].cpu().numpy()
-            #oracle_path = oracle_path.astype(int)
+            oracle_path = oracle_path.astype(int)
             # print('predicted path: ', predicted_path)
             # print('oracle path: ', oracle_path)
-            #oracle_cities = cities[oracle_path]
-            #predicted_cities = cities[predicted_path]
-            #oracle_cities = (np.concatenate((oracle_cities, np.expand_dims(
-            #                 oracle_cities[0], axis=0)), axis=0))
-            #predicted_cities = (np.concatenate((predicted_cities, np.
-            #                    expand_dims(predicted_cities[0], axis=0)),
-            #                    axis=0))
+            oracle_cities = cities[oracle_path]
+            predicted_cities = cities[predicted_path]
+            oracle_cities = (np.concatenate((oracle_cities, np.expand_dims(
+                             oracle_cities[0], axis=0)), axis=0))
+            predicted_cities = (np.concatenate((predicted_cities, np.
+                                expand_dims(predicted_cities[0], axis=0)),
+                                axis=0))
             plt.figure(2, figsize=(12, 12))
             plt.clf()
             plt.scatter(cities[:, 0], cities[:, 1], c='b')
-            #plt.plot(oracle_cities[:, 0], oracle_cities[:, 1], c='r')
-            #plt.title('Target: {0:.3f}'
-            #          .format(20*np.sqrt(2)-oracle_cost), fontsize=100)
-            path = os.path.join(self.path_dir, 'cities_{}.png'.format(fig))
+            plt.plot(oracle_cities[:, 0], oracle_cities[:, 1], c='r')
+            plt.title('Target: {0:.3f}'
+                      .format(20*np.sqrt(2)-oracle_cost), fontsize=100)
+            path = os.path.join(self.path_dir, 'ground_truth_{}.png'.format(fig))
             plt.savefig(path, format='png')
 
-            #plt.figure(2, figsize=(12, 12))
-            #plt.clf()
-            #plt.scatter(cities[:, 0], cities[:, 1], c='b')
-            #plt.plot(predicted_cities[:, 0], predicted_cities[:, 1], c='g')
-            #plt.title('Predicted: {0:.3f}'
-            #          .format(20*np.sqrt(2) - cost), fontsize=100)
-            #path = os.path.join(self.path_dir, 'pred_tsp{}.eps'.format(fig))
-            #plt.savefig(path, format='eps')
+            plt.figure(2, figsize=(12, 12))
+            plt.clf()
+            plt.scatter(cities[:, 0], cities[:, 1], c='b')
+            plt.plot(predicted_cities[:, 0], predicted_cities[:, 1], c='g')
+            plt.title('Predicted: {0:.3f}'
+                      .format(20*np.sqrt(2) - cost), fontsize=100)
+            path = os.path.join(self.path_dir, 'pred_tsp{}.png'.format(fig))
+            plt.savefig(path, format='png')
 
     def add_train_loss(self, loss_split, loss_merge):
         self.loss_train.append([loss_split.data.cpu().numpy(), loss_merge.data.cpu().numpy()])

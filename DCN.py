@@ -3,8 +3,9 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.autograd import Variable
-import numpy as np
+import torch.nn.functional as F
 
+import numpy as np
 import nou_utils as utils
 import os
 import time
@@ -38,7 +39,7 @@ parser.add_argument('--path_dataset', nargs='?', const=1, type=str, default='./d
 parser.add_argument('--path_load_split', nargs='?', const=1, type=str, default='')
 parser.add_argument('--path_load_tsp', nargs='?', const=1, type=str, default='')
 parser.add_argument('--path_load_merge', nargs='?', const=1, type=str, default='')
-parser.add_argument('--path_save_model', nargs='?', const=1, type=str, default='/saved_model/')
+parser.add_argument('--path_save_model', nargs='?', const=1, type=str, default='./saved_model/')
 parser.add_argument('--path_logger', nargs='?', const=1, type=str, default='')
 parser.add_argument('--path_tsp', nargs='?', const=1, type=str, default='')
 parser.add_argument('--print_freq', nargs='?', const=1, type=int, default=100)
@@ -102,16 +103,24 @@ class DCN():
         self.optimizer_split = optim.RMSprop(self.Split.parameters())
         self.optimizer_tsp = optim.Adamax(self.Tsp.parameters(), lr=1e-3)
         self.optimizer_merge = optim.Adamax(self.Merge.parameters(), lr=1e-3)
-    
+   
+    def set_optimizers(self):
+        self.optimizer_split = optim.RMSprop(self.Split.parameters())
+        self.optimizer_tsp = optim.Adamax(self.Tsp.parameters(), lr=1e-3)
+        self.optimizer_merge = optim.Adamax(self.Merge.parameters(), lr=1e-3)
+
     def load_split(self, path_load):
         self.Split = self.logger.load_model(path_load, 'split')
+        self.set_optimizers()
     
     def load_tsp(self, path_load):
-        self.Split = self.logger.load_model(path_load, 'tsp')
-    
+        self.Tsp = self.logger.load_model(path_load, 'tsp')
+        self.set_optimizers()
+
     def load_merge(self, path_load):
-        self.Split = self.logger.load_model(path_load, 'merge')
-    
+        self.Merge = self.logger.load_model(path_load, 'merge')
+        self.set_optimizers()
+
     def save_model(self, path_load):
         self.logger.save_model(path_load, self.Split, self.Tsp, self.Merge)
     
@@ -130,48 +139,91 @@ class DCN():
             nn.init.uniform(rand)
         else:
             rand = torch.ones(*probs.size()).type(dtype) / 2
-        sample = (probs > Variable(rand)).type(dtype)
+        bin_sample = probs > Variable(rand)
+        sample = bin_sample.clone().type(dtype)
         log_probs_samples = (sample*torch.log(probs) + (1-sample)*torch.log(1-probs)).sum(1)
-        return sample.data, log_probs_samples
+        return bin_sample.data, sample.data, log_probs_samples
     
-    def compute_operators(self, W, e, J):
-        # operators: {Id, W, W^2, ..., W^{J-1}, D, U}++
-        # e[batch_index,j] is the id of the subgraph where node j is
-        bs = e.size(0)
-        n = W.size(-1)
-        e_rows = e.unsqueeze(1).expand(bs, n, n)
-        e_cols = e.unsqueeze(2).expand(bs, n, n)
-        Phi = ((e_rows - e_cols) == 0).type(dtype)
-        W = W * Phi
+    def split_operator(self, W, sample, cities):
+        bs = sample.size(0)
+        Ns1 = sample.long().sum(1)
+        N1 = Ns1.max(0)[0][0]
+        W1 = torch.zeros(bs, N1, N1).type(dtype)
+        cts = torch.zeros(bs, N1, 2).type(dtype)
+        for b in range(bs):
+            inds = torch.nonzero(sample[b]).squeeze()
+            n = Ns1[b]
+            W1[b,:n,:n] = W[b].index_select(1, inds).index_select(0, inds)
+            cts[b,:n,:] = cities[b].index_select(0, inds)
+        return W1, cts
+
+    def compute_other_operators(self, W, Ns, cts, J):
+        bs = W.size(0)
+        N = W.size(-1)
         QQ = W.clone()
-        WW = torch.zeros(bs, n, n, J + 2).type(dtype)
-        eye = torch.eye(n).type(dtype).unsqueeze(0).expand(bs,n,n)
+        WW = torch.zeros(bs, N, N, J + 2).type(dtype)
+        eye = torch.eye(N).type(dtype).unsqueeze(0).expand(bs,N,N)
         WW[:, :, :, 0] = eye
         for j in range(J):
-            WW[:, :, :, j + 1] = QQ.clone()
+            WW[:, :, :, j+1] = QQ.clone()
             QQ = torch.bmm(QQ, QQ)
-            mx = QQ.max(1)[0].unsqueeze(1).expand_as(QQ) * Phi
-            mx = mx.max(2)[0].unsqueeze(2).expand_as(QQ) * Phi + (1-Phi)
-            QQ = QQ / torch.clamp(mx, min=1e-6)
+            mx = QQ.max(2)[0].max(1)[0].unsqueeze(1).unsqueeze(2).expand_as(QQ)
+            QQ /= torch.clamp(mx, min=1e-6)
             QQ *= np.sqrt(2)
         d = W.sum(1)
         D = d.unsqueeze(1).expand_as(eye) * eye
         WW[:, :, :, J] = D
+        U = Ns.float().unsqueeze(1).expand(bs,N)
+        U = torch.ge(U, torch.arange(1,N+1).type(dtype).unsqueeze(0).expand(bs,N))
+        U = U.float() / Ns.float().unsqueeze(1).expand_as(U)
+        U = torch.bmm(U.unsqueeze(2),U.unsqueeze(1))
+        WW[:, :, :, J+1] = U
+        x = torch.cat((d.unsqueeze(2),cts),2)
+        return Variable(WW), Variable(x), Variable(WW[:,:,:,1])
+
+
+    def compute_operators(self, W, sample, cities, J):
+        bs = sample.size(0)
+        Ns1 = sample.long().sum(1)
+        Ns2 = (1-sample.long()).sum(1)
+        W1, cts1 = self.split_operator(W, sample, cities)
+        W2, cts2 = self.split_operator(W, 1-sample, cities)
+        op1 = self.compute_other_operators(W1, Ns1, cts1, J)
+        op2 = self.compute_other_operators(W2, Ns2, cts2, J)
+        return op1, op2
         WW[:, :, :, J + 1] = Phi / Phi.sum(1).unsqueeze(1).expand_as(Phi)
         return WW, d, Phi
     
+    def join_preds(self, pred1, pred2, sample):
+        bs = pred1.size(0)
+        N = sample.size(1)
+        N1 = pred1.size(1)
+        N2 = pred2.size(1)
+        pred = Variable(torch.ones(bs,N,N).type(dtype)*(-999))
+
+        for b in range(bs):
+            n1 = sample[b].long().sum(0)[0]
+            n2 = (1-sample[b]).long().sum(0)[0]
+            inds = torch.cat((torch.nonzero(sample[b]).type(dtype),torch.nonzero(1-sample[b]).type(dtype)),0).squeeze()
+            inds = torch.topk(-inds,N)[1]
+            M = Variable(torch.zeros(N,N).type(dtype))
+            M[:n1,:n1] = pred1[b,:n1,:n1]
+            M[n1:,n1:] = pred2[b,:n2,:n2]
+            inds = Variable(inds, requires_grad=False)
+            M = M.index_select(0,inds).index_select(1,inds)
+            pred[b, :, :] = M
+        return pred
+
     def forward(self, input, W, cities):
         scores, probs = self.Split(input)
         #variance = compute_variance(probs)
-        sample, log_probs_samples = self.sample_one(probs, mode='train')
-        WW, x, Phi = self.compute_operators(W.data, sample, self.J)
-        x = torch.cat((x.unsqueeze(2),cities),2)
-        y = WW[:,:,:,1]
-        WW = Variable(WW).type(dtype)
-        x = Variable(x).type(dtype)
-        y = Variable(y).type(dtype)
-        partial_pred = self.Tsp((WW,x,y))
-        partial_pred = partial_pred * Variable(Phi)
+        bin_sample, sample, log_probs_samples = self.sample_one(probs, mode='train')
+        op1, op2 = self.compute_operators(W.data, bin_sample, cities, self.J)
+        pred1 = self.Tsp(op1)
+        pred2 = self.Tsp(op2)
+        partial_pred = self.join_preds(pred1, pred2, bin_sample)
+        partial_pred = F.sigmoid(partial_pred)
+        
         pred = self.Merge((input[0], input[1], partial_pred))
         return probs, log_probs_samples, pred
     
@@ -224,6 +276,7 @@ class DCN():
                 #os.system('eog ./plots/clustering/clustering_it_{}.png'.format(it))
             if it%test_freq == 0 and it > 0:
                 self.test()
+                self.logger.plot_test_logs()
             if it%save_freq == 0 and it > 0:
                 self.save_model(path_model)
     
@@ -231,7 +284,7 @@ class DCN():
         iterations_test = int(self.gen.num_examples_test / self.batch_size)
         for it in range(iterations_test):
             start = time.time()
-            batch = gen.sample_batch(batch_size, is_training=False, it=it,
+            batch = self.gen.sample_batch(self.batch_size, is_training=False, it=it,
                                     cuda=torch.cuda.is_available())
             input, W, WTSP, labels, target, cities, perms, costs = extract(batch)
             probs, log_probs_samples, pred = self.forward(input, W, cities)
@@ -271,10 +324,12 @@ if __name__ == '__main__':
     beam_size = 20
     
     logger = Logger('./logs')
+    logger.write_settings(args)
     Dcn = DCN(batch_size, num_features, num_layers, J, 3, args.clip_grad_norm, logger)
     Dcn.set_dataset(args.path_dataset, num_examples_train, num_examples_test, N_train, N_test)
     Dcn.load_split(args.path_load_split)
-    Dcn.load_tsp(args.path_load_tsp)
+    #Dcn.load_tsp(args.path_save_model)
+    #Dcn.load_merge(args.path_save_model)
     Dcn.train(args.iterations, args.print_freq, args.test_freq, args.save_freq, args.path_save_model)
     
 
