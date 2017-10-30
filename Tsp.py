@@ -28,6 +28,8 @@ class Tsp():
         
 '''
 
+sortid = open('sortida.txt', 'w')
+
 if torch.cuda.is_available():
     dtype = torch.cuda.FloatTensor
     dtype_l = torch.cuda.LongTensor
@@ -187,9 +189,13 @@ def test(split, logger, gen):
             out = ['---', it, loss, logger.accuracy_test_aux[-1], 
                    0, 0, elapsed]
             print(template_test1.format(*info_test))
+            print(template_test1.format(*info_test), file=sortid)
             print(template_test2.format(*out))
+            print(template_test2.format(*out), file=sortid)
     print('TEST COST: {} | TEST ACCURACY {}\n'
           .format(logger.cost_test[-1], logger.accuracy_test[-1]))
+    print('TEST COST: {} | TEST ACCURACY {}\n'
+          .format(logger.cost_test[-1], logger.accuracy_test[-1]), file=sortid)
 
 def execute(Split, Tsp, Merge, batch):
     input, W, WTSP, labels, target, cities, perms, costs = extract(batch)
@@ -286,23 +292,22 @@ def execute_split_train(Split, batch):
 
 
 if __name__ == '__main__':
-    path_dataset = './dataset/'
+    path_dataset = '/data/folque/dataset/'
     gen = Generator(path_dataset, './LKH/')
     #N = 20
     gen.num_examples_train = 20000
     gen.num_examples_test = 1000
-    gen.N_train = 20
-    gen.N_test = 20
+    gen.N_train = 10
+    gen.N_test = 10
     gen.load_dataset()
     
     clip_grad = 40.0
-    iterations = 50000
+    iterations = 100000
     batch_size = 20
-    num_features = 10
-    num_layers = 5
+    num_features = 20
+    num_layers = 20
     J = 4
-    rf = 10.0 # regularization factor
-    beam_size = 20
+    beam_size = 40
     
     logger = Logger('./logs')
     
@@ -315,7 +320,7 @@ if __name__ == '__main__':
     optimizer_merge = optim.Adamax(Merge.parameters(), lr=1e-3)
     
     mode = 'train'
-    Split, Tsp, Merge = logger.load_model('./logs')
+    #Split, Tsp, Merge = logger.load_model('./logs')
     if mode == 'train':
         for it in range(iterations):
             start = time.time()
@@ -344,7 +349,9 @@ if __name__ == '__main__':
                 out = ['---', it, loss, logger.accuracy_train[-1],
                     0, 0, elapsed]
                 print(template_train1.format(*info_train))
+                print(template_train1.format(*info_train), file=sortid)
                 print(template_train2.format(*out))
+                print(template_train2.format(*out), file=sortid)
                 #print(variance)
                 #print(probs[0])
                 #plot_clusters(it, probs[0], cities[0])
@@ -352,7 +359,7 @@ if __name__ == '__main__':
             if it%2000 == 0 and it > 0:
                 test(Split, logger, gen)
             if it%1000 == 0 and it > 0:
-                logger.save_model('./logs',Split,Tsp,Merge)
+                logger.save_model('./saved_model/',Split,Tsp,Merge)
     else:
         Split, Tsp, Merge = logger.load_model('./logs')
         test(Split, logger, gen)
