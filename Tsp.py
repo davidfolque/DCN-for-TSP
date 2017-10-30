@@ -15,18 +15,15 @@ import time
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import math
+import argparse
 
-'''
-class Tsp():
-    def __init__(self, batch_size, num_features, num_layers, J):
-        self.batch_size = batch_size
-        self.num_features = num_features,
-        self.num_layers = num_layers
-        self.J = J
-        
-        self.split = Split_GNN(batch_size, num_features, num_layers, J)
-        
-'''
+parser = argparse.ArgumentParser()
+
+parser.add_argument('--mode', nargs='?', const=1, type=str, default='train')
+parser.add_argument('--N_test', nargs='?', const=1, type=int, default=20)
+parser.add_argument('--path_load', nargs='?', const=1, type=str, default='')
+
+args = parser.parse_args()
 
 if torch.cuda.is_available():
     dtype = torch.cuda.FloatTensor
@@ -166,6 +163,14 @@ def compute_variance(probs):
 def compute_test_cost(pred, W, beam_size):
     utils.beamsearch_hamcycle(pred.data, W.data, beam_size=beam_size)
 
+def print_optims(gen):
+    batch = gen.sample_batch(gen.num_examples_test, is_training=False, it=0, 
+                                cuda=torch.cuda.is_available())
+    input, W, WTSP, labels, target, cities, perms, costs = extract(batch)
+    optim = costs.mean()
+    print(optim)
+    print('OPTIM COST: {}'.format(costs.mean()))
+
 def test(split, logger, gen):
     iterations_test = int(gen.num_examples_test / batch_size)
     # siamese_gnn.eval()
@@ -292,7 +297,7 @@ if __name__ == '__main__':
     gen.num_examples_train = 20000
     gen.num_examples_test = 1000
     gen.N_train = 20
-    gen.N_test = 20
+    gen.N_test = args.N_test
     gen.load_dataset()
     
     clip_grad = 40.0
@@ -306,17 +311,12 @@ if __name__ == '__main__':
     
     logger = Logger('./logs')
     
-    Split = Split_GNN(batch_size, num_features, num_layers, J+2, dim_input=3)
     Tsp = GNN(num_features, num_layers, J+2, dim_input=3)
-    Merge = GNN(num_features, num_layers, J+2, dim_input=3)
     
-    optimizer_split = optim.RMSprop(Split.parameters())
     optimizer_tsp = optim.Adamax(Tsp.parameters(), lr=1e-3)
-    optimizer_merge = optim.Adamax(Merge.parameters(), lr=1e-3)
     
-    mode = 'train'
-    Split, Tsp, Merge = logger.load_model('./logs')
-    if mode == 'train':
+    #Split, Tsp, Merge = logger.load_model('./logs')
+    if args.mode == 'train':
         for it in range(iterations):
             start = time.time()
             batch = gen.sample_batch(batch_size, cuda=torch.cuda.is_available())
@@ -354,8 +354,9 @@ if __name__ == '__main__':
             if it%1000 == 0 and it > 0:
                 logger.save_model('./logs',Split,Tsp,Merge)
     else:
-        Split, Tsp, Merge = logger.load_model('./logs')
+        Split, Tsp, Merge = logger.load_model(args.path_load)
         test(Split, logger, gen)
+        print_optims(gen)
     
     
     
