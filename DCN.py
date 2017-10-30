@@ -36,9 +36,7 @@ parser.add_argument('--batch_size', nargs='?', const=1, type=int, default=32)
 parser.add_argument('--beam_size', nargs='?', const=1, type=int, default=40)
 parser.add_argument('--mode', nargs='?', const=1, type=str, default='train')
 parser.add_argument('--path_dataset', nargs='?', const=1, type=str, default='./dataset/')
-parser.add_argument('--path_load_split', nargs='?', const=1, type=str, default='')
-parser.add_argument('--path_load_tsp', nargs='?', const=1, type=str, default='')
-parser.add_argument('--path_load_merge', nargs='?', const=1, type=str, default='')
+parser.add_argument('--path_load', nargs='?', const=1, type=str, default='')
 parser.add_argument('--path_save_model', nargs='?', const=1, type=str, default='./saved_model/')
 parser.add_argument('--path_logger', nargs='?', const=1, type=str, default='./logs/')
 parser.add_argument('--path_tsp', nargs='?', const=1, type=str, default='./LKH/')
@@ -103,26 +101,23 @@ class DCN():
         self.optimizer_split = optim.RMSprop(self.Split.parameters())
         self.optimizer_tsp = optim.Adamax(self.Tsp.parameters(), lr=1e-3)
         self.optimizer_merge = optim.Adamax(self.Merge.parameters(), lr=1e-3)
+        self.test_gens = []
+        self.test_gens_labels = []
    
-    def set_optimizers(self):
-        self.optimizer_split = optim.RMSprop(self.Split.parameters())
-        self.optimizer_tsp = optim.Adamax(self.Tsp.parameters(), lr=1e-3)
-        self.optimizer_merge = optim.Adamax(self.Merge.parameters(), lr=1e-3)
-
     def load_split(self, path_load):
         self.Split = self.logger.load_model(path_load, 'split')
-        self.set_optimizers()
+        self.optimizer_split = optim.RMSprop(self.Split.parameters())
     
     def load_tsp(self, path_load):
         self.Tsp = self.logger.load_model(path_load, 'tsp')
-        self.set_optimizers()
+        self.optimizer_tsp = optim.Adamax(self.Tsp.parameters(), lr=1e-3)
 
     def load_merge(self, path_load):
         self.Merge = self.logger.load_model(path_load, 'merge')
-        self.set_optimizers()
+        self.optimizer_merge = optim.Adamax(self.Merge.parameters(), lr=1e-3)
 
-    def save_model(self, path_load):
-        self.logger.save_model(path_load, self.Split, self.Tsp, self.Merge)
+    def save_model(self, path_load, it=-1):
+        self.logger.save_model(path_load, self.Split, self.Tsp, self.Merge, it=it)
     
     def set_dataset(self, path_dataset, num_examples_train, num_examples_test, N_train, N_test):
         self.gen = Generator(path_dataset, args.path_tsp)
@@ -132,6 +127,10 @@ class DCN():
         self.gen.N_test = N_test
         self.gen.load_dataset()
     
+    def add_test_dataset(self, gen, label):
+        self.test_gens.append(gen)
+        self.test_gens_labels.append(label)
+
     def sample_one(self, probs, mode='train'):
         probs = 1e-4 + probs*(1 - 2e-4) # to avoid log(0)
         if mode == 'train':
@@ -274,17 +273,22 @@ class DCN():
                 #print(probs[0])
                 #plot_clusters(it, probs[0], cities[0])
                 #os.system('eog ./plots/clustering/clustering_it_{}.png'.format(it))
-            if it%test_freq == 0 and it > 0:
+            if it%test_freq == 0 and it >= 0:
                 self.test()
-                self.logger.plot_test_logs()
+                #self.logger.plot_test_logs()
             if it%save_freq == 0 and it > 0:
-                self.save_model(path_model)
+                self.save_model(path_model, it)
     
     def test(self):
-        iterations_test = int(self.gen.num_examples_test / self.batch_size)
+        for i, gen in enumerate(self.test_gens):
+            print('Test: {}'.format(self.test_gens_labels[i]))
+            self.test_gen(gen)
+
+    def test_gen(self, gen):
+        iterations_test = int(gen.num_examples_test / self.batch_size)
         for it in range(iterations_test):
             start = time.time()
-            batch = self.gen.sample_batch(self.batch_size, is_training=False, it=it,
+            batch = gen.sample_batch(self.batch_size, is_training=False, it=it,
                                     cuda=torch.cuda.is_available())
             input, W, WTSP, labels, target, cities, perms, costs = extract(batch)
             probs, log_probs_samples, pred = self.forward(input, W, cities)
@@ -305,13 +309,20 @@ class DCN():
             .format(self.logger.cost_test[-1], self.logger.accuracy_test[-1]))
 
 
-
+def create_gen(path_dataset, num_examples_test, num):
+    gen = Generator(path_dataset, args.path_tsp)
+    gen.num_examples_train = 1
+    gen.num_examples_test = num_examples_test
+    gen.N_train = 10
+    gen.N_test = num
+    gen.load_dataset()
+    return gen
 
 if __name__ == '__main__':
     
     N_train = 20
-    N_test = 40
-    
+    N_test = 20
+
     num_examples_train = 20000
     num_examples_test = 1000
     clip_grad = 40.0
@@ -321,16 +332,25 @@ if __name__ == '__main__':
     num_layers = 20
     J = 4
     beam_size = 40
-    
+   
     logger = Logger('./logs')
     logger.write_settings(args)
     Dcn = DCN(batch_size, num_features, num_layers, J, 3, args.clip_grad_norm, logger)
     Dcn.set_dataset(args.path_dataset, num_examples_train, num_examples_test, N_train, N_test)
-    #Dcn.load_split(args.path_load_split)
-    #Dcn.load_tsp(args.path_save_model)
-    #Dcn.load_merge(args.path_save_model)
-    Dcn.train(args.iterations, args.print_freq, args.test_freq, args.save_freq, args.path_save_model)
-    
+
+    Dcn.add_test_dataset(create_gen('/data/folque/dataset/', num_examples_test, 10), 'N=10')
+    Dcn.add_test_dataset(create_gen('/data/folque/dataset/', num_examples_test, 20), 'N=20')
+    Dcn.add_test_dataset(create_gen('/data/folque/dataset/', num_examples_test, 40), 'N=40')
+    Dcn.add_test_dataset(create_gen('/data/folque/dataset/', num_examples_test, 80), 'N=80')
+
+    if args.load:
+        Dcn.load_split(args.path_load)
+        Dcn.load_tsp(args.path_load)
+        Dcn.load_merge(args.path_load)
+    if args.mode == 'train':
+        Dcn.train(args.iterations, args.print_freq, args.test_freq, args.save_freq, args.path_save_model)
+    else:
+        Dcn.test()
 
 
 

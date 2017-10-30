@@ -57,8 +57,11 @@ class Logger(object):
                 self.args[str(arg)] = getattr(args, arg)
 
     
-    def save_model(self, path, split, tsp, merge):
-        save_dir = os.path.join(path, 'parameters/')
+    def save_model(self, path, split, tsp, merge, it=-1):
+        if it == -1:
+            save_dir = os.path.join(path, 'parameters/')
+        else:
+            save_dir = os.path.join(path, 'parameters_{}/'.format(it))
         # Create directory if necessary
         try:
             os.stat(save_dir)
