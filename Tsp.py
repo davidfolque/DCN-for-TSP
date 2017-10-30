@@ -16,6 +16,8 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import math
 
+sortid = open('sortida.txt', 'w')
+
 '''
 class Tsp():
     def __init__(self, batch_size, num_features, num_layers, J):
@@ -188,9 +190,13 @@ def test(split, tsp, merge, logger, gen, beam_size=2):
             out = ['---', it, loss, logger.accuracy_test_aux[-1], 
                    logger.cost_test_aux[-1], beam_size, elapsed]
             print(template_test1.format(*info_test))
+            print(template_test1.format(*info_test), file=sortid)
             print(template_test2.format(*out))
+            print(template_test2.format(*out), file=sortid)
     print('TEST COST: {} | TEST ACCURACY {}\n'
           .format(logger.cost_test[-1], logger.accuracy_test[-1]))
+    print('TEST COST: {} | TEST ACCURACY {}\n'
+          .format(logger.cost_test[-1], logger.accuracy_test[-1]), file=sortid)
 
 def execute(Split, Tsp, Merge, batch):
     input, W, WTSP, labels, target, cities, perms, costs = extract(batch)
@@ -257,7 +263,7 @@ def oracle_split(W, mat_perm, perms):
         costos = torch.zeros(N//2).type(dtype)
         for i in range(N // 2):
             pre0,exc0,pre10,exc10 = fake_split_b(W[b],mat_perm[b],perms[b],i)
-            costos[i] = W[b,pre0,exc0] + W[b,pre10,exc10] - W[b,pre0,exc10] - W[b,pre10,exc0]
+            costos[i] = -(W[b,pre0,exc0] + W[b,pre10,exc10] - W[b,pre0,exc10] - W[b,pre10,exc0])
         imax = costos.max(0)[1]
         pre0,exc0,pre10,exc10 = fake_split_b(W[b],mat_perm[b],perms[b],imax[0])
         out[b,pre0,exc0] = 0
@@ -272,7 +278,7 @@ def oracle_split(W, mat_perm, perms):
 
 
 if __name__ == '__main__':
-    path_dataset = './dataset/'
+    path_dataset = '/data/folque/dataset/'
     gen = Generator(path_dataset, './LKH/')
     N = 20
     gen.num_examples_train = 20000
@@ -281,13 +287,12 @@ if __name__ == '__main__':
     gen.load_dataset()
     
     clip_grad = 40.0
-    iterations = 50000
+    iterations = 100000
     batch_size = 20
-    num_features = 10
-    num_layers = 5
+    num_features = 20
+    num_layers = 20
     J = 4
-    rf = 10.0 # regularization factor
-    beam_size = 20
+    beam_size = 40
     
     logger = Logger('./logs')
     
@@ -299,7 +304,7 @@ if __name__ == '__main__':
     optimizer_tsp = optim.Adamax(Tsp.parameters(), lr=1e-3)
     optimizer_merge = optim.Adamax(Merge.parameters(), lr=1e-3)
     
-    for it in range(iterations):
+    for it in range(iterations+1):
         start = time.time()
         batch = gen.sample_batch(batch_size, cuda=torch.cuda.is_available())
         input, W, WTSP, labels, target, cities, perms, costs = extract(batch)
@@ -321,20 +326,23 @@ if __name__ == '__main__':
         logger.add_train_accuracy(pred, labels, W)
         elapsed = time.time() - start
         
-        if it%50 == 0:
+        if it%100 == 0:
             loss = loss.data.cpu().numpy()[0]
             loss_reinforce = loss_reinforce.data.cpu().numpy()[0]
             out = ['---', it, loss, logger.accuracy_train[-1],
                    logger.cost_train[-1], loss_reinforce, elapsed]
             print(template_train1.format(*info_train))
+            print(template_train1.format(*info_train), file=sortid)
             print(template_train2.format(*out))
+            print(template_train2.format(*out), file=sortid)
             #print(variance)
             #print(probs[0])
             #plot_clusters(it, probs[0], cities[0])
             #os.system('eog ./plots/clustering/clustering_it_{}.png'.format(it))
-        if it%200 == 0 and it > 0:
+        if it%2000 == 0 and it > 0:
             test(Split, Tsp, Merge, logger, gen, beam_size=beam_size)
-        
+        if it%1000 == 0 and it > 0:
+            logger.save_model('./saved_model/', Split, Tsp, Merge)
         
         
         

@@ -56,27 +56,29 @@ class Logger(object):
                 file.write(str(arg) + ' : ' + str(getattr(args, arg)) + '\n')
                 self.args[str(arg)] = getattr(args, arg)
 
-    '''
-    def save_model(self, model):
-        save_dir = os.path.join(self.path, 'parameters/')
+    def save_model(self, path, split, tsp, merge):
+        save_dir = os.path.join(path, 'parameters/')
         # Create directory if necessary
         try:
             os.stat(save_dir)
         except:
             os.mkdir(save_dir)
-        path = os.path.join(save_dir, 'gnn.pt')
-        torch.save(model, path)
+        path = os.path.join(save_dir, 'split.pt')
+        torch.save(split, path)
+        path = os.path.join(save_dir, 'tsp.pt')
+        torch.save(tsp, path)
+        path = os.path.join(save_dir, 'merge.pt')
+        torch.save(merge, path)
         print('Model Saved.')
 
-    def load_model(self, parameters_path):
-        path = os.path.join(parameters_path, 'parameters/gnn.pt')
+    def load_model(self, parameters_path, model):
+        path = os.path.join(parameters_path, 'parameters/{}.pt'.format(model))
         if os.path.exists(path):
             print('GNN successfully loaded from {}'.format(path))
             return torch.load(path)
         else:
             raise ValueError('Parameter path {} does not exist.'
                              .format(path))
-    '''
 
     def plot_example(self, Paths, costs, oracle_costs, Perms,
                      Cities, num_plots=1):
